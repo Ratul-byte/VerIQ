@@ -13,6 +13,7 @@ import { verifyFinancials } from "@/lib/rules/financial";
 import { usable } from "@/lib/rules/util";
 import type {
   Check, ComparisonRow, Decision, Extraction, FinancialLine, PageText, PrLine, TraceEntry, VerificationResult,
+  VerificationProgress, VerificationStepId,
 } from "@/lib/types";
 
 const concat = <T,>() => ({ reducer: (a: T[], b: T[]) => a.concat(b), default: () => [] as T[] });
@@ -161,6 +162,66 @@ const graph = new StateGraph(State)
   .addEdge("escalate", "report")
   .addEdge("report", END)
   .compile();
+
+const progressSteps: Record<string, VerificationStepId> = {
+  ingest: "ingest",
+  extract: "extract",
+  validate: "validate",
+  compare: "compare",
+  rules: "rules",
+  verify_financials: "financial",
+  decide: "decide",
+};
+
+function progressFor(nodeName: string, update: Partial<S>): VerificationProgress | null {
+  const step = progressSteps[nodeName];
+  if (!step) return null;
+  const trace = update.trace?.[0];
+  const findings: string[] = [];
+  if (step === "ingest") {
+    if (update.pages?.length) findings.push(`${update.pages.length} page(s) read`);
+    if (update.prLines?.length) findings.push(`${update.prLines.length} purchase-request line(s) loaded`);
+  } else if (step === "extract" && update.extraction) {
+    const extracted = Object.values(update.extraction).filter((value) => value && typeof value === "object" && "status" in value && value.status === "extracted").length;
+    findings.push(`${extracted} field(s) extracted`);
+    if (update.issues?.length) findings.push(`${update.issues.length} extraction conflict(s)`);
+  } else if (step === "validate" && update.issues) {
+    const reviews = update.issues.filter((issue) => issue.outcome === "review").length;
+    findings.push(reviews ? `${reviews} validation issue(s) need review` : "All extracted evidence is grounded");
+  } else if (step === "compare" && update.checks) {
+    findings.push(`${update.checks.filter((check) => check.outcome === "pass").length} purchase-request check(s) passed`);
+  } else if (step === "rules" && update.checks) {
+    findings.push(`${update.checks.filter((check) => check.outcome === "pass").length} contract check(s) passed`);
+  } else if (step === "financial" && update.checks) {
+    findings.push(`${update.checks.filter((check) => check.outcome === "pass").length} financial check(s) passed`);
+  } else if (step === "decide" && update.decision) {
+    findings.push(`Decision: ${update.decision}`);
+  }
+  return {
+    step,
+    status: trace?.note?.startsWith("error:") ? "failed" : "completed",
+    note: trace?.note,
+    findings,
+    decision: update.decision ?? undefined,
+  };
+}
+
+export async function* streamVerification(input: {
+  fileName: string; bytes: Uint8Array; prCsv: string; mode?: ExtractorMode; signal?: AbortSignal;
+}): AsyncGenerator<VerificationProgress | VerificationResult> {
+  const stream = await graph.stream({
+    fileName: input.fileName, pdfBytes: input.bytes, prCsv: input.prCsv,
+    extractorMode: input.mode ?? resolveMode(),
+    extraction: null, decision: null, processingError: null, result: null,
+  }, { streamMode: "updates", signal: input.signal } as never);
+  for await (const update of stream) {
+    for (const [nodeName, value] of Object.entries(update as Record<string, Partial<S>>)) {
+      const progress = progressFor(nodeName, value);
+      if (progress) yield progress;
+      if (nodeName === "report" && value.result) yield value.result;
+    }
+  }
+}
 
 export async function runVerification(input: {
   fileName: string; bytes: Uint8Array; prCsv: string; mode?: ExtractorMode;

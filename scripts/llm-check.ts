@@ -10,7 +10,7 @@ import { readPdf } from "../lib/pdf/read-pdf";
 async function main() {
   try { process.loadEnvFile(".env.local"); } catch { /* env may already be set */ }
   const key = process.env.OPENROUTER_API_KEY;
-  const model = process.env.OPENROUTER_MODEL || "nvidia/nemotron-3-ultra-550b-a55b:free";
+  const model = process.env.OPENROUTER_MODEL;
   console.log(`Model: ${model} | key: ${key ? `set (${key.length} chars)` : "MISSING"}`);
   if (!key) return;
 

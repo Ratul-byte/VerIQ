@@ -120,6 +120,16 @@ export interface TraceEntry {
   note?: string;
 }
 
+export type VerificationStepId = "ingest" | "extract" | "validate" | "compare" | "rules" | "financial" | "decide";
+
+export interface VerificationProgress {
+  step: VerificationStepId;
+  status: "completed" | "failed";
+  note?: string;
+  findings?: string[];
+  decision?: Decision;
+}
+
 export interface VerificationResult {
   docId: string;
   fileName: string;

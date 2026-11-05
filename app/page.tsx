@@ -6,7 +6,7 @@ import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 
 import { Button, Card, CardHeader, DecisionBadge } from "@/components/ui";
 import { useStore } from "@/lib/client-store";
 import { download, resultsToCsv } from "@/lib/export-csv";
-import { DECISION_LABEL, type Decision, type VerificationResult } from "@/lib/types";
+import { DECISION_LABEL, type Decision, type VerificationProgress, type VerificationResult } from "@/lib/types";
 import { apiUrl } from "@/lib/client-api";
 
 interface SamplesInfo {
@@ -31,6 +31,7 @@ export default function Page() {
   const [drag, setDrag] = useState(false);
   const [filter, setFilter] = useState<"ALL" | Decision>("ALL");
   const [search, setSearch] = useState("");
+  const [progress, setProgress] = useState<VerificationProgress[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -49,6 +50,7 @@ export default function Page() {
       seen.add(key);
       next.push({ key, file: f, name: f.name, state: "queued" });
     }
+    if (next.length > 0) setProgress([]);
     setQueue((q) => [...q, ...next]);
     setNotice(msgs.length ? msgs.join(" ") : null);
   }, [queue]);
@@ -60,20 +62,45 @@ export default function Page() {
     for (const it of items) {
       if (controller.signal.aborted) break;
       setQueue((q) => q.map((x) => (x.key === it.key ? { ...x, state: "running" } : x)));
+      setProgress([]);
       try {
         const fd = new FormData();
         if (it.file) fd.append("file", it.file); else fd.append("sample", it.sample!);
         if (prFile) fd.append("pr", prFile);
         const res = await fetch(apiUrl("/api/verify"), { method: "POST", body: fd, signal: controller.signal });
-        const text = await res.text();
-        let body: { error?: string };
-        try {
-          body = JSON.parse(text) as { error?: string };
-        } catch {
-          throw new Error(`Verification failed (${res.status}). The server did not return a JSON result.`);
+        if (!res.ok) {
+          const errorText = await res.text();
+          throw new Error(`Verification failed (${res.status}): ${errorText || "Request failed"}`);
         }
-        if (!res.ok) throw new Error(body.error || "Request failed");
-        saveResult(body as VerificationResult);
+        if (!res.body) throw new Error("Verification failed: the server returned no progress stream.");
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let result: VerificationResult | null = null;
+        const consume = (chunk: string) => {
+          buffer += chunk;
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            const event = JSON.parse(line) as VerificationProgress | VerificationResult;
+            if ("step" in event) setProgress((current) => [...current.filter((p) => p.step !== event.step), event]);
+            else result = event;
+          }
+        };
+        while (true) {
+          const part = await reader.read();
+          if (part.done) break;
+          consume(decoder.decode(part.value, { stream: true }));
+        }
+        consume(decoder.decode());
+        if (buffer.trim()) {
+          const event = JSON.parse(buffer) as VerificationProgress | VerificationResult;
+          if ("step" in event) setProgress((current) => [...current.filter((p) => p.step !== event.step), event]);
+          else result = event;
+        }
+        if (!result) throw new Error("Verification failed: the server ended without a final result.");
+        saveResult(result);
         setQueue((q) => q.map((x) => (x.key === it.key ? { ...x, state: "done" } : x)));
       } catch (e) {
         if (controller.signal.aborted || (e instanceof DOMException && e.name === "AbortError")) {
@@ -115,6 +142,17 @@ export default function Page() {
     return !q || [r.supplierName, r.quotationNumber, r.fileName, r.itemId].some((v) => v?.toLowerCase().includes(q));
   });
   const doneCount = queue.filter((q) => q.state === "done" || q.state === "error" || q.state === "cancelled").length;
+  const progressLabels: Record<VerificationProgress["step"], string> = {
+    ingest: "Document ingestion",
+    extract: "Structured extraction",
+    validate: "Extraction validation",
+    compare: "Purchase-request comparison",
+    rules: "Contract-rule verification",
+    financial: "Financial verification",
+    decide: "Final decision",
+  };
+  const stepOrder = Object.keys(progressLabels) as VerificationProgress["step"][];
+  const activeStep = stepOrder.find((step) => !progress.some((event) => event.step === step)) ?? null;
   const chart = [
     { name: "Approve", value: counts.APPROVE, fill: "#10b981" },
     { name: "Reject", value: counts.REJECT, fill: "#ef4444" },
@@ -191,6 +229,28 @@ export default function Page() {
                 <p className="mt-1 text-xs text-navy-500">{doneCount} of {queue.length} documents processed</p>
               </div>
             )}
+            {progress.length > 0 && (
+              <div className="rounded-lg border border-navy-100 bg-navy-50/50 p-3">
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-navy-500">
+                  Live processing{!running && !activeStep ? " · completed" : ""}
+                </div>
+                <ol className="space-y-2">
+                  {stepOrder.map((step) => {
+                    const event = progress.find((item) => item.step === step);
+                    const active = activeStep === step;
+                    return (
+                      <li key={step} className="flex items-start gap-2 text-sm">
+                        {event?.status === "failed" ? <XCircle size={16} className="mt-0.5 text-red-600" /> : event ? <CheckCircle2 size={16} className="mt-0.5 text-emerald-600" /> : active ? <Loader2 size={16} className="mt-0.5 animate-spin text-brand" /> : <span className="mt-0.5 h-4 w-4 rounded-full border border-navy-200" />}
+                        <div>
+                          <div className={active ? "font-semibold text-brand" : "font-medium text-navy-800"}>{progressLabels[step]}{active ? " · in progress" : ""}</div>
+                          {event?.findings?.map((finding) => <div key={finding} className="text-xs text-navy-500">{finding}</div>)}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </div>
+            )}
 
             <div className="flex flex-wrap gap-2">
               <Button onClick={runUploaded} disabled={running || !queue.some((q) => q.file && (q.state === "queued" || q.state === "error"))}>
@@ -204,7 +264,7 @@ export default function Page() {
           </div>
         </Card>
 
-        <Card>
+        <Card className="self-start">
           <CardHeader title="Decision distribution" />
           <div className="h-52 p-3">
             {rows.length === 0 ? (

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-function headers(request: Request): HeadersInit {
+export function corsHeaders(request: Request): HeadersInit {
   const origin = request.headers.get("origin");
   const allowed = process.env.CORS_ORIGIN;
   return {
@@ -12,11 +12,11 @@ function headers(request: Request): HeadersInit {
 
 export function corsJson(request: Request, data: unknown, init?: ResponseInit) {
   const response = NextResponse.json(data, init);
-  const cors = headers(request);
+  const cors = corsHeaders(request);
   for (const [key, value] of Object.entries(cors)) response.headers.set(key, value);
   return response;
 }
 
 export function corsOptions(request: Request) {
-  return new NextResponse(null, { status: 204, headers: headers(request) });
+  return new NextResponse(null, { status: 204, headers: corsHeaders(request) });
 }

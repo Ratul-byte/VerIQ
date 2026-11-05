@@ -4,7 +4,6 @@ import { PipelineError } from "@/lib/errors";
 import { ExtractionSchema, type Extraction, type PageText } from "@/lib/types";
 
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
-export const DEFAULT_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free";
 
 const SYSTEM = `You extract structured data from ONE supplier quotation (with its terms and conditions).
 Rules you must follow:
@@ -67,7 +66,7 @@ export async function llmExtract(pages: PageText[]): Promise<Extraction> {
     maxRetries: 1, // one retry for 429 / 5xx with backoff
     defaultHeaders: { "HTTP-Referer": process.env.APP_URL || "http://localhost:3000", "X-Title": "Ver-IQ" },
   });
-  const model = process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
+  const model = process.env.OPENROUTER_MODEL;
   const body = pages.map((p) => `=== PAGE ${p.page} ===\n${p.text}`).join("\n\n");
   const rf = zodResponseFormat(ExtractionSchema, "quotation_extraction");
   const schemaText = JSON.stringify(rf.json_schema.schema);

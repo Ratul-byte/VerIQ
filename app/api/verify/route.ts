@@ -1,5 +1,5 @@
-import { corsJson, corsOptions } from "@/lib/api-cors";
-import { runVerification } from "@/lib/langgraph/graph";
+import { corsHeaders, corsJson, corsOptions } from "@/lib/api-cors";
+import { streamVerification } from "@/lib/langgraph/graph";
 import { readBundled, readSample } from "@/lib/server-data";
 import { MAX_PDF_BYTES } from "@/lib/pdf/read-pdf";
 
@@ -46,8 +46,22 @@ export async function POST(req: Request) {
     if (!prCsv) return corsJson(req, { error: "No purchase request CSV is available." }, { status: 400 });
 
     // The pipeline converts every failure into a NEEDS_REVIEW result with a safe message.
-    const result = await runVerification({ fileName, bytes, prCsv });
-    return corsJson(req, result);
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        try {
+          for await (const event of streamVerification({ fileName, bytes, prCsv, signal: req.signal })) {
+            controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+          }
+          controller.close();
+        } catch (e) {
+          controller.error(e);
+        }
+      },
+    });
+    return new Response(stream, {
+      headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-cache", ...corsHeaders(req) },
+    });
   } catch (e) {
     console.error("[veriq] /api/verify failed", e);
     return corsJson(req, { error: "Verification failed unexpectedly." }, { status: 500 });

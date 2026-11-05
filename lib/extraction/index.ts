@@ -50,7 +50,7 @@ function crossCheck(llm: Extraction, heur: Extraction): { merged: Extraction; co
       const h = heur.items[i];
       if (!h) return;
       for (const k of ["itemId", "description", "unit", "quantity", "unitPrice", "lineTotal"] as const) {
-        if (k === "itemId" && !validItemId(it[k].value) && h[k].status === "extracted") {
+        if (k === "itemId" && h[k].status === "extracted" && (it[k].status !== "extracted" || !validItemId(it[k].value))) {
           it[k] = structuredClone(h[k]);
           continue;
         }
