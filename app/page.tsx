@@ -7,6 +7,7 @@ import { Button, Card, CardHeader, DecisionBadge } from "@/components/ui";
 import { useStore } from "@/lib/client-store";
 import { download, resultsToCsv } from "@/lib/export-csv";
 import { DECISION_LABEL, type Decision, type VerificationResult } from "@/lib/types";
+import { apiUrl } from "@/lib/client-api";
 
 interface SamplesInfo {
   samples: string[]; missingSamples: string[]; hasPurchaseRequest: boolean; hasRules: boolean; extractorMode: string;
@@ -32,7 +33,7 @@ export default function Page() {
   const [search, setSearch] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { fetch("/api/samples").then((r) => r.json()).then(setInfo).catch(() => setInfo(null)); }, []);
+  useEffect(() => { fetch(apiUrl("/api/samples")).then((r) => r.json()).then(setInfo).catch(() => setInfo(null)); }, []);
 
   const addFiles = useCallback(async (files: FileList | File[]) => {
     const msgs: string[] = [];
@@ -59,7 +60,7 @@ export default function Page() {
         const fd = new FormData();
         if (it.file) fd.append("file", it.file); else fd.append("sample", it.sample!);
         if (prFile) fd.append("pr", prFile);
-        const res = await fetch("/api/verify", { method: "POST", body: fd });
+        const res = await fetch(apiUrl("/api/verify"), { method: "POST", body: fd });
         const text = await res.text();
         let body: { error?: string };
         try {

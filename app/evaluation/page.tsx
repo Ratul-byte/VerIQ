@@ -4,6 +4,7 @@ import { FlaskConical, Loader2 } from "lucide-react";
 import { Button, Card, CardHeader, DecisionBadge } from "@/components/ui";
 import { CLASSES, summarizeEval, type EvalRow, type EvalSummary } from "@/lib/evaluation/metrics";
 import { DECISION_LABEL, type Decision, type VerificationResult } from "@/lib/types";
+import { apiUrl } from "@/lib/client-api";
 
 interface Label { file: string; expected: Decision; reason: string; verified: boolean }
 interface RowX extends EvalRow { reason: string; why?: string }
@@ -21,8 +22,8 @@ export default function EvaluationPage() {
   async function run() {
     setRunning(true); setErr(null); setRows(null); setSummary(null);
     try {
-      const info = await (await fetch("/api/samples")).json();
-      const gt = await (await fetch("/api/ground-truth")).json();
+      const info = await (await fetch(apiUrl("/api/samples"))).json();
+      const gt = await (await fetch(apiUrl("/api/ground-truth"))).json();
       setMode(info.extractorMode);
       const labels: Label[] = (gt.labels ?? []).filter((l: Label) => l.verified && info.samples.includes(l.file));
       setExpectedDocs(info.samples.length + info.missingSamples.length);
@@ -32,7 +33,7 @@ export default function EvaluationPage() {
         fd.append("sample", l.file);
         let predicted: Decision | null = null, why: string | undefined, procErr: string | null = null;
         try {
-          const res = await fetch("/api/verify", { method: "POST", body: fd });
+          const res = await fetch(apiUrl("/api/verify"), { method: "POST", body: fd });
           const text = await res.text();
           let body: { error?: string };
           try {
