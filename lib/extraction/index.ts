@@ -14,6 +14,8 @@ export function resolveMode(): ExtractorMode {
 }
 
 const strip = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+const validItemId = (value: unknown): value is string =>
+  typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(value);
 
 function sameValue(a: unknown, b: unknown): boolean {
   if (typeof a === "number" && typeof b === "number") return D(a).eq(b);
@@ -48,6 +50,10 @@ function crossCheck(llm: Extraction, heur: Extraction): { merged: Extraction; co
       const h = heur.items[i];
       if (!h) return;
       for (const k of ["itemId", "description", "unit", "quantity", "unitPrice", "lineTotal"] as const) {
+        if (k === "itemId" && !validItemId(it[k].value) && h[k].status === "extracted") {
+          it[k] = structuredClone(h[k]);
+          continue;
+        }
         cmp(`items[${i}].${k}`, it[k] as Field<unknown>, h[k] as Field<unknown>);
       }
     });

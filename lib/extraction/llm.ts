@@ -20,6 +20,7 @@ Rules you must follow:
 - penalty: the late-delivery penalty. percent as stated, period (day/week/month), basis ("order_value" only if stated as % of order/contract value). If the document explicitly says there is no penalty, return status "missing" and quote that sentence. If there is no mention at all, return "missing".
 - validity: days if stated as a period; untilDate if stated as an expiry date.
 - items: one entry per quoted line. Do not merge lines. If the table is unreadable, return an empty array.
+- itemId: copy the visible item code exactly. Never return JSON punctuation such as {, }, [, ], :, or quotes as an itemId; if the code is unclear, use status "unclear".
 - Do not compute anything; copy figures as printed even if they look wrong.`;
 
 function parseJson(text: string): unknown {

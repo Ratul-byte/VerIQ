@@ -107,4 +107,11 @@ describe("extraction validation (grounding)", () => {
   it("rejects a structurally invalid extraction", () => {
     expect(() => validateExtraction({ bogus: true } as never, pages)).toThrow();
   });
+  it("repairs JSON punctuation used as an item ID from the grounded table row", () => {
+    const ex = cleanExtraction();
+    ex.items[0].itemId = ok("{", "A Cotton twill fabric, 280 gsm 12000 metre 472.00 5664000.00");
+    const p = [{ page: 1, text: "A Cotton twill fabric, 280 gsm 12000 metre 472.00 5664000.00" }];
+    expect(validateExtraction(ex, p).extraction.items[0].itemId.value).toBe("A");
+    expect(validateExtraction(ex, p).extraction.items[0].itemId.status).toBe("extracted");
+  });
 });

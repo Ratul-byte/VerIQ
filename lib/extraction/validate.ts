@@ -4,6 +4,7 @@ import { ExtractionSchema } from "@/lib/types";
 import { collapse, fullText, locatePage, numbersIn } from "./text-utils";
 import { RULES } from "@/lib/rules/config";
 import { usable } from "@/lib/rules/util";
+import { heuristicExtract } from "./heuristic";
 
 /** "Missing" claims are cross-checked against the raw text; a hit downgrades to "unclear". */
 const MISSING_HINTS: Record<string, RegExp> = {
@@ -38,6 +39,17 @@ export function validateExtraction(raw: Extraction, pages: PageText[]): { extrac
   const issues: Check[] = [];
   const text = fullText(pages);
   const ctext = collapse(text);
+  const heuristic = heuristicExtract(pages);
+  const validItemId = (value: unknown): value is string =>
+    typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(value);
+
+  /* PDF table extraction can make a model read JSON punctuation as the item code.
+     Repair only from the deterministic parser when the corresponding row is grounded. */
+  ex.items.forEach((item, i) => {
+    if (item.itemId.status !== "extracted" || validItemId(item.itemId.value)) return;
+    const candidate = heuristic.items[i]?.itemId;
+    if (candidate?.status === "extracted" && validItemId(candidate.value)) item.itemId = structuredClone(candidate);
+  });
 
   const downgrade = (name: string, f: AnyField, why: string) => {
     f.status = "unclear";
