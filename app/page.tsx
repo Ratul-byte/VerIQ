@@ -12,7 +12,7 @@ import { apiUrl } from "@/lib/client-api";
 interface SamplesInfo {
   samples: string[]; missingSamples: string[]; hasPurchaseRequest: boolean; hasRules: boolean; extractorMode: string;
 }
-type Queued = { key: string; file?: File; sample?: string; name: string; state: "queued" | "running" | "done" | "error"; error?: string };
+type Queued = { key: string; file?: File; sample?: string; name: string; state: "queued" | "running" | "done" | "error" | "cancelled"; error?: string };
 
 async function fingerprint(f: File) {
   try {
@@ -32,6 +32,7 @@ export default function Page() {
   const [filter, setFilter] = useState<"ALL" | Decision>("ALL");
   const [search, setSearch] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => { fetch(apiUrl("/api/samples")).then((r) => r.json()).then(setInfo).catch(() => setInfo(null)); }, []);
 
@@ -54,13 +55,16 @@ export default function Page() {
 
   const runQueue = useCallback(async (items: Queued[]) => {
     setRunning(true);
+    const controller = new AbortController();
+    abortRef.current = controller;
     for (const it of items) {
+      if (controller.signal.aborted) break;
       setQueue((q) => q.map((x) => (x.key === it.key ? { ...x, state: "running" } : x)));
       try {
         const fd = new FormData();
         if (it.file) fd.append("file", it.file); else fd.append("sample", it.sample!);
         if (prFile) fd.append("pr", prFile);
-        const res = await fetch(apiUrl("/api/verify"), { method: "POST", body: fd });
+        const res = await fetch(apiUrl("/api/verify"), { method: "POST", body: fd, signal: controller.signal });
         const text = await res.text();
         let body: { error?: string };
         try {
@@ -72,11 +76,23 @@ export default function Page() {
         saveResult(body as VerificationResult);
         setQueue((q) => q.map((x) => (x.key === it.key ? { ...x, state: "done" } : x)));
       } catch (e) {
+        if (controller.signal.aborted || (e instanceof DOMException && e.name === "AbortError")) {
+          setQueue((q) => q.map((x) => x.key === it.key ? { ...x, state: "cancelled" } : x));
+          break;
+        }
         setQueue((q) => q.map((x) => (x.key === it.key ? { ...x, state: "error", error: (e as Error).message } : x)));
       }
     }
+    if (controller.signal.aborted) {
+      setQueue((q) => q.map((x) => x.state === "queued" ? { ...x, state: "cancelled" } : x));
+    }
+    abortRef.current = null;
     setRunning(false);
   }, [prFile, saveResult]);
+
+  const cancelVerification = () => {
+    abortRef.current?.abort();
+  };
 
   const runSamples = () => {
     if (!info) return;
@@ -98,7 +114,7 @@ export default function Page() {
     const q = search.trim().toLowerCase();
     return !q || [r.supplierName, r.quotationNumber, r.fileName, r.itemId].some((v) => v?.toLowerCase().includes(q));
   });
-  const doneCount = queue.filter((q) => q.state === "done" || q.state === "error").length;
+  const doneCount = queue.filter((q) => q.state === "done" || q.state === "error" || q.state === "cancelled").length;
   const chart = [
     { name: "Approve", value: counts.APPROVE, fill: "#10b981" },
     { name: "Reject", value: counts.REJECT, fill: "#ef4444" },
@@ -163,6 +179,7 @@ export default function Page() {
                       {q.state === "running" && <><Loader2 size={13} className="animate-spin text-brand" /> Verifying</>}
                       {q.state === "done" && <><CheckCircle2 size={13} className="text-emerald-600" /> Done</>}
                       {q.state === "error" && <span className="text-red-600" title={q.error}><XCircle size={13} className="inline" /> {q.error}</span>}
+                      {q.state === "cancelled" && <span className="text-navy-500"><XCircle size={13} className="inline" /> Cancelled</span>}
                     </span>
                   </li>
                 ))}
@@ -182,6 +199,7 @@ export default function Page() {
               <Button variant="ghost" onClick={runSamples} disabled={running || !info || info.samples.length === 0 || !info.hasPurchaseRequest}>
                 <FlaskConical size={15} /> Use sample dataset ({info?.samples.length ?? 0} files)
               </Button>
+              {running && <Button variant="ghost" onClick={cancelVerification}><XCircle size={15} /> Cancel</Button>}
             </div>
           </div>
         </Card>
