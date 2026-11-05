@@ -1,0 +1,11 @@
+{
+  "note": "Hand-labelled expected decisions, derived by reading each PDF against purchase-request.csv and company-rules.md. Kept separate from the verification engine, which never reads this file. Only packs that are actually present in data/samples may be listed.",
+  "labels": [
+    {
+      "file": "supplier-pack-01.pdf",
+      "expected": "APPROVE",
+      "reason": "Item A: 12,000 m at 472.00 (max 480.00, so -1.67%). Quantity equals request. Advance 10%. Balance 45 days after delivery. Delivery 24 days. Penalty 1%/week. Validity 45 days. TIN and BIN present. VAT 15% shown separately. Line total, subtotal, VAT and total all recompute correctly.",
+      "verified": true
+    }
+  ]
+}
