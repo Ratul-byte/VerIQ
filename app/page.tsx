@@ -60,7 +60,13 @@ export default function Page() {
         if (it.file) fd.append("file", it.file); else fd.append("sample", it.sample!);
         if (prFile) fd.append("pr", prFile);
         const res = await fetch("/api/verify", { method: "POST", body: fd });
-        const body = await res.json();
+        const text = await res.text();
+        let body: { error?: string };
+        try {
+          body = JSON.parse(text) as { error?: string };
+        } catch {
+          throw new Error(`Verification failed (${res.status}). The server did not return a JSON result.`);
+        }
         if (!res.ok) throw new Error(body.error || "Request failed");
         saveResult(body as VerificationResult);
         setQueue((q) => q.map((x) => (x.key === it.key ? { ...x, state: "done" } : x)));
@@ -109,12 +115,6 @@ export default function Page() {
         <div className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
           <AlertTriangle size={16} className="mt-0.5 shrink-0" />
           <span>No <code>OPENROUTER_API_KEY</code> is configured on the server, so documents are read by the rule-based parser, not by AI. Decisions are still deterministic, but this mode is tuned to the sample layout only.</span>
-        </div>
-      )}
-      {info && info.missingSamples.length > 0 && (
-        <div className="flex gap-2 rounded-lg border border-navy-100 bg-white p-3 text-sm text-navy-700">
-          <FileText size={16} className="mt-0.5 shrink-0 text-navy-500" />
-          <span>{info.samples.length} of 10 sample packs are bundled. Missing: {info.missingSamples.join(", ")}. Results below only cover documents that were actually processed.</span>
         </div>
       )}
 

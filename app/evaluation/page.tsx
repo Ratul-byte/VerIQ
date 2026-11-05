@@ -33,7 +33,13 @@ export default function EvaluationPage() {
         let predicted: Decision | null = null, why: string | undefined, procErr: string | null = null;
         try {
           const res = await fetch("/api/verify", { method: "POST", body: fd });
-          const body = await res.json();
+          const text = await res.text();
+          let body: { error?: string };
+          try {
+            body = JSON.parse(text) as { error?: string };
+          } catch {
+            throw new Error(`Verification failed (${res.status}). The server did not return a JSON result.`);
+          }
           if (!res.ok) throw new Error(body.error);
           const r = body as VerificationResult;
           procErr = r.processingError;
