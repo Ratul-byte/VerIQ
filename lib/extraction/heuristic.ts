@@ -41,7 +41,8 @@ export function heuristicExtract(pages: PageText[]): Extraction {
   const vat = m(/^\s*VAT\s*(?:@\s*)?(\d+(?:\.\d+)?)\s*%\s+([\d,]+\.\d{2})/im);
   const tot = m(/^\s*(?:Grand\s+)?Total\s+([\d,]+\.\d{2})/im);
 
-  const adv = m(/(\d+(?:\.\d+)?)\s*%\s*advance[^.]*\./i) ?? m(/advance[^.\n]*?(\d+(?:\.\d+)?)\s*%/i);
+  const noAdvance = m(/\b(?:no|without)\s+(?:any\s+)?advance(?:\s+payment)?(?:\s+(?:is\s+)?required)?\b[^.]*\.?/i);
+  const adv = noAdvance ? null : m(/(\d+(?:\.\d+)?)\s*%\s*advance[^.]*\./i) ?? m(/advance[^.\n]*?(\d+(?:\.\d+)?)\s*%/i);
   const bal = m(/(?:balance|remaining)[^.]*?within\s+(\d+)\s+days\s+(?:after|of|from)\s+(delivery|invoice|[a-z]+)/i);
   const del = m(/deliver(?:y|ed)?\s+within\s+(\d+)\s+(days?|weeks?|months?|working days?)\s+(?:of|from|after)\s+(?:receiving\s+)?(?:the\s+)?(purchase order|PO|order)/i);
   const pen = m(/penalty[^.]*?(\d+(?:\.\d+)?)\s*%\s*of\s+(?:the\s+)?order\s+value[^.]*?(?:per|for each|each|every)\s+(?:full\s+)?(week|day|month)/i);
@@ -69,7 +70,7 @@ export function heuristicExtract(pages: PageText[]): Extraction {
     vatPercent: vat ? found(Number(vat[1]), vat[0].trim()) : none(),
     vatAmount: vat ? found(num(vat[2]), vat[0].trim()) : none(),
     grandTotal: tot ? found(num(tot[1]), tot[0].trim()) : none(),
-    advancePercent: adv ? found(Number(adv[1]), adv[0]) : none(),
+    advancePercent: noAdvance ? found(0, noAdvance[0]) : adv ? found(Number(adv[1]), adv[0]) : none(),
     balancePayment: bal
       ? found({ days: Number(bal[1]), basis: /^delivery$/i.test(bal[2]) ? ("after_delivery" as const) : /^invoice$/i.test(bal[2]) ? ("after_invoice" as const) : ("other" as const) }, bal[0])
       : none(),

@@ -28,6 +28,19 @@ describe("extraction on the real sample", () => {
     expect(ex.delivery.value).toEqual({ value: 24, unit: "days", from: "purchase_order" });
   });
 
+  it("extracts an explicit no-advance term as 0%", () => {
+    const ex = heuristicExtract([{ page: 1, text: "No advance payment required. Balance payable within 45 days after delivery." }]);
+    expect(ex.advancePercent).toMatchObject({ status: "extracted", value: 0 });
+    const validated = validateExtraction(ex, [{ page: 1, text: "No advance payment required. Balance payable within 45 days after delivery." }]);
+    expect(validated.extraction.advancePercent).toMatchObject({ status: "extracted", value: 0 });
+    expect(validated.issues.some((issue) => issue.id === "extraction_advancePercent")).toBe(false);
+  });
+
+  it("keeps an absent advance term missing", () => {
+    const ex = heuristicExtract([{ page: 1, text: "Balance payable within 45 days after delivery." }]);
+    expect(ex.advancePercent.status).toBe("missing");
+  });
+
   it("runs the whole graph and approves pack-01 with evidence", async () => {
     const r = await runVerification({ fileName: "supplier-pack-01.pdf", bytes: pdf, prCsv, mode: "heuristic" });
     expect(r.decision).toBe("APPROVE");

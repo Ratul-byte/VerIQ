@@ -16,6 +16,7 @@ const MISSING_HINTS: Record<string, RegExp> = {
   advancePercent: /advance[^.\n]{0,80}\d|\d+\s*%[^.\n]{0,40}advance/i,
   balancePayment: /(?:balance|remaining)[^.\n]{0,80}\d+\s*days/i,
 };
+const NO_ADVANCE_PHRASE = /\b(?:no|without)\s+(?:any\s+)?advance(?:\s+payment)?(?:\s+(?:is\s+)?required)?\b/i;
 
 type AnyField = Field<unknown>;
 
@@ -71,7 +72,8 @@ export function validateExtraction(raw: Extraction, pages: PageText[]): { extrac
       if (nums.length) {
         const inQuote = numbersIn(f.quote).map((n) => D(n));
         const allFound = nums.every((n) => inQuote.some((x) => x.eq(n)));
-        if (!allFound) return downgrade(name, f, "The extracted number does not appear in its supporting quotation.");
+        const explicitNoAdvance = name === "advancePercent" && nums.length === 1 && nums[0] === 0 && NO_ADVANCE_PHRASE.test(f.quote);
+        if (!allFound && !explicitNoAdvance) return downgrade(name, f, "The extracted number does not appear in its supporting quotation.");
       }
       if (typeof f.value === "string") {
         if (name === "quotationDate") {

@@ -13,7 +13,7 @@ Rules you must follow:
 - Numbers: plain JSON numbers, no thousands separators, no currency symbols.
 - quotationDate and validity.untilDate: ISO yyyy-mm-dd. If the date format is ambiguous (e.g. 03/04/2026), mark it "unclear".
 - supplierTin / supplierBin: copy exactly as printed. If the label exists but the value is a placeholder (N/A, pending, blank), mark "missing".
-- advancePercent: the percentage payable in advance. If no advance is mentioned, mark "missing" (do not assume 0).
+- advancePercent: the percentage payable in advance. If the document explicitly says no advance, no advance payment, no advance payment required, without advance, or equivalent, return status "extracted" with value 0 and quote the exact wording. If no advance term is mentioned, mark "missing" (do not assume 0).
 - balancePayment: days and the reference point ("after_delivery" only if the text says after delivery/acceptance of goods; "after_invoice" if after invoice; otherwise "other").
 - delivery: value and unit exactly as stated; "from" = "purchase_order" only if counted from receiving/placing the purchase order.
 - penalty: the late-delivery penalty. percent as stated, period (day/week/month), basis ("order_value" only if stated as % of order/contract value). If the document explicitly says there is no penalty, return status "missing" and quote that sentence. If there is no mention at all, return "missing".
