@@ -14,7 +14,7 @@ import { readPdf } from "@/lib/pdf/read-pdf";
 const pdf = new Uint8Array(fs.readFileSync("data/samples/supplier-pack-01.pdf"));
 const prCsv = fs.readFileSync("data/purchase-request.csv", "utf8");
 
-type Behaviour = "ok" | "no_schema_support" | "garbage" | "unauthorized" | "guardrail_blocked" | "wrong_price" | "fake_tin" | "error_in_200" | "provider_502" | "empty_reasoning" | "slow";
+type Behaviour = "ok" | "no_schema_support" | "garbage" | "unauthorized" | "guardrail_blocked" | "wrong_price" | "fake_tin" | "error_in_200" | "provider_502" | "empty_reasoning" | "slow" | "fallback";
 let behaviour: Behaviour = "ok";
 let server: http.Server;
 let lastRequest: { auth?: string; model?: string; hadSchema: boolean } | null = null;
@@ -32,6 +32,7 @@ beforeAll(async () => {
       const body = JSON.parse(raw || "{}");
       lastRequest = { auth: req.headers.authorization, model: body.model, hadSchema: !!body.response_format };
       const send = (status: number, text: string) => { res.writeHead(status, { "content-type": "application/json" }); res.end(text); };
+      if (behaviour === "fallback" && body.model === "vendor/some-model") return send(502, JSON.stringify({ error: { message: "primary unavailable", code: 502 } }));
       if (behaviour === "error_in_200") return send(200, JSON.stringify({ error: { message: "Provider returned error", code: 502, metadata: { provider_name: "FakeProvider", raw: "upstream overloaded" } } }));
       if (behaviour === "provider_502") return send(502, JSON.stringify({ error: { message: "Bad gateway from upstream", code: 502 } }));
       if (behaviour === "empty_reasoning") return send(200, JSON.stringify({ id: "x", object: "chat.completion", created: 0, model: "fake", choices: [{ index: 0, finish_reason: "length", message: { role: "assistant", content: null, reasoning: "thinking…" } }] }));
@@ -55,8 +56,9 @@ beforeAll(async () => {
   process.env.OPENROUTER_BASE_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   process.env.OPENROUTER_API_KEY = "test-key";
   process.env.OPENROUTER_MODEL = "vendor/some-model";
+  process.env.OPENROUTER_FALLBACK_MODELS = "";
 });
-afterAll(() => { server.close(); delete process.env.OPENROUTER_API_KEY; delete process.env.OPENROUTER_BASE_URL; delete process.env.OPENROUTER_MODEL; });
+afterAll(() => { server.close(); delete process.env.OPENROUTER_API_KEY; delete process.env.OPENROUTER_BASE_URL; delete process.env.OPENROUTER_MODEL; delete process.env.OPENROUTER_FALLBACK_MODELS; delete process.env.OPENROUTER_TIMEOUT_MS; });
 
 const run = (mode: "llm" | "both") => runVerification({ fileName: "supplier-pack-01.pdf", bytes: pdf, prCsv, mode });
 
@@ -75,6 +77,15 @@ describe("OpenRouter client (fake server)", () => {
     expect(lastRequest?.hadSchema).toBe(false);
     expect(r.processingError).toBeNull();
     expect(r.decision).toBe("APPROVE");
+  });
+  it("tries configured fallback models when the primary model fails", async () => {
+    behaviour = "fallback";
+    process.env.OPENROUTER_FALLBACK_MODELS = "vendor/fallback-model";
+    const r = await run("llm");
+    expect(lastRequest?.model).toBe("vendor/fallback-model");
+    expect(r.processingError).toBeNull();
+    expect(r.decision).toBe("APPROVE");
+    delete process.env.OPENROUTER_FALLBACK_MODELS;
   });
   it("non-JSON output -> NEEDS_REVIEW, never approval", async () => {
     behaviour = "garbage";

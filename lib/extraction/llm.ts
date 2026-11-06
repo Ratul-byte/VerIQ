@@ -53,7 +53,7 @@ function describeApiError(e: unknown): { status?: number; text: string } {
   return { status: err.status ?? (typeof inner.code === "number" ? inner.code : undefined), text: clip(parts.join(" ").replace(/\s+/g, " ")) };
 }
 
-/** Extraction through OpenRouter (OpenAI-compatible). Works with any model; strict JSON schema is used when the model supports it. */
+/** Extraction through OpenRouter (OpenAI-compatible). Strict output is attempted before prompt-enforced JSON. */
 export async function llmExtract(pages: PageText[]): Promise<Extraction> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new PipelineError("LLM extraction is not configured (OPENROUTER_API_KEY missing).", "llm_unavailable");
@@ -66,12 +66,18 @@ export async function llmExtract(pages: PageText[]): Promise<Extraction> {
     maxRetries: 1, // one retry for 429 / 5xx with backoff
     defaultHeaders: { "HTTP-Referer": process.env.APP_URL || "http://localhost:3000", "X-Title": "Ver-IQ" },
   });
-  const model = process.env.OPENROUTER_MODEL;
+  const primaryModel = process.env.OPENROUTER_MODEL?.trim();
+  if (!primaryModel) throw new PipelineError("LLM extraction is not configured (OPENROUTER_MODEL missing).", "llm_unavailable");
+  const fallbackModels = (process.env.OPENROUTER_FALLBACK_MODELS || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const models = [...new Set([primaryModel, ...fallbackModels])];
   const body = pages.map((p) => `=== PAGE ${p.page} ===\n${p.text}`).join("\n\n");
   const rf = zodResponseFormat(ExtractionSchema, "quotation_extraction");
   const schemaText = JSON.stringify(rf.json_schema.schema);
 
-  const ask = async (structured: boolean): Promise<Extraction> => {
+  const ask = async (model: string, structured: boolean): Promise<Extraction> => {
     const res = (await client.chat.completions.create({
       model,
       temperature: 0,
@@ -110,7 +116,7 @@ export async function llmExtract(pages: PageText[]): Promise<Extraction> {
     return parsed.data;
   };
 
-  const fail = (e: unknown): never => {
+  const fail = (e: unknown, model: string): never => {
     if (e instanceof PipelineError) throw e;
     console.error("[veriq] OpenRouter call failed:", (e as Error)?.name, (e as Error)?.message, (e as { cause?: unknown })?.cause ?? "");
     // The SDK's error classes do not set `name`, so detect them with instanceof.
@@ -135,17 +141,32 @@ export async function llmExtract(pages: PageText[]): Promise<Extraction> {
     throw new PipelineError(`The AI extraction service failed${status ? ` (HTTP ${status})` : ""}: ${text || "unknown error"}`, "llm_unavailable");
   };
 
-  try {
-    return await ask(true);
-  } catch (e) {
-    const status = (e as { status?: number }).status;
-    const unsupported = status === 400 || status === 404 || status === 422;
-    const badOutput = e instanceof PipelineError && e.kind === "schema_failure";
-    if (!unsupported && !badOutput) return fail(e);
-    // Model/provider lacks strict structured output (or the reasoning option) or produced bad JSON: retry once with prompt-enforced JSON.
-    // A policy block (guardrail / data policy) is not a capability problem, so do not retry it.
-    const text = describeApiError(e).text;
-    if (status === 404 && /free model training|guardrail restrictions|data policy/i.test(text)) return fail(e);
-    try { return await ask(false); } catch (e2) { return fail(e2); }
+  const attempt = async (model: string): Promise<Extraction> => {
+    try {
+      return await ask(model, true);
+    } catch (e) {
+      const status = (e as { status?: number }).status;
+      const unsupported = status === 400 || status === 404 || status === 422;
+      const badOutput = e instanceof PipelineError && e.kind === "schema_failure";
+      if (!unsupported && !badOutput) throw e;
+      // Model/provider lacks strict structured output (or the reasoning option) or produced bad JSON: retry once with prompt-enforced JSON.
+      // A policy block (guardrail / data policy) is not a capability problem, so do not retry it.
+      const text = describeApiError(e).text;
+      if (status === 404 && /free model training|guardrail restrictions|data policy/i.test(text)) throw e;
+      return await ask(model, false);
+    }
+  };
+
+  let lastError: unknown;
+  for (const model of models) {
+    try {
+      return await attempt(model);
+    } catch (e) {
+      lastError = e;
+      if (model !== models[models.length - 1]) {
+        console.warn(`[veriq] Model ${model} failed; trying the configured fallback model.`);
+      }
+    }
   }
+  return fail(lastError, models[models.length - 1]);
 }
