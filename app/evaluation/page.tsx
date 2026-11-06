@@ -1,73 +1,30 @@
 "use client";
-import { useState } from "react";
-import { FlaskConical, Loader2 } from "lucide-react";
-import { Button, Card, CardHeader, DecisionBadge } from "@/components/ui";
-import { CLASSES, summarizeEval, type EvalRow, type EvalSummary } from "@/lib/evaluation/metrics";
-import { DECISION_LABEL, type Decision, type VerificationResult } from "@/lib/types";
-import { apiUrl } from "@/lib/client-api";
-
-interface Label { file: string; expected: Decision; reason: string; verified: boolean }
-interface RowX extends EvalRow { reason: string; why?: string }
+import { useMemo } from "react";
+import { Card, CardHeader, DecisionBadge } from "@/components/ui";
+import { evaluateResults } from "@/lib/evaluation/evaluate";
+import { SUPPLIER_PACKS } from "@/lib/evaluation/reference";
+import { CLASSES, summarizeEval, type EvalSummary } from "@/lib/evaluation/metrics";
+import { useStore } from "@/lib/client-store";
+import { DECISION_LABEL } from "@/lib/types";
 
 const pct = (v: number | null) => (v === null ? "n/a" : `${(v * 100).toFixed(1)}%`);
 
 export default function EvaluationPage() {
-  const [running, setRunning] = useState(false);
-  const [rows, setRows] = useState<RowX[] | null>(null);
-  const [summary, setSummary] = useState<EvalSummary | null>(null);
-  const [expectedDocs, setExpectedDocs] = useState<number>(0);
-  const [mode, setMode] = useState<string>("");
-  const [err, setErr] = useState<string | null>(null);
-
-  async function run() {
-    setRunning(true); setErr(null); setRows(null); setSummary(null);
-    try {
-      const info = await (await fetch(apiUrl("/api/samples"))).json();
-      const gt = await (await fetch(apiUrl("/api/ground-truth"))).json();
-      setMode(info.extractorMode);
-      const labels: Label[] = (gt.labels ?? []).filter((l: Label) => l.verified && info.samples.includes(l.file));
-      setExpectedDocs(info.samples.length + info.missingSamples.length);
-      const out: RowX[] = [];
-      for (const l of labels) {
-        const fd = new FormData();
-        fd.append("sample", l.file);
-        let predicted: Decision | null = null, why: string | undefined, procErr: string | null = null;
-        try {
-          const res = await fetch(apiUrl("/api/verify"), { method: "POST", body: fd });
-          const text = await res.text();
-          let body: { error?: string };
-          try {
-            body = JSON.parse(text) as { error?: string };
-          } catch {
-            throw new Error(`Verification failed (${res.status}). The server did not return a JSON result.`);
-          }
-          if (!res.ok) throw new Error(body.error);
-          const r = body as VerificationResult;
-          procErr = r.processingError;
-          predicted = r.processingError ? null : r.decision;
-          why = r.processingError ?? r.summary;
-        } catch (e) { why = (e as Error).message; }
-        out.push({ file: l.file, expected: l.expected, predicted, reason: l.reason, why, processingError: procErr });
-      }
-      setRows(out);
-      setSummary(summarizeEval(out));
-    } catch (e) { setErr((e as Error).message || "Evaluation failed"); }
-    setRunning(false);
-  }
+  const { results, ready } = useStore();
+  const rows = useMemo(() => evaluateResults(Object.values(results)), [results]);
+  const summary = useMemo<EvalSummary>(() => summarizeEval(rows), [rows]);
+  const missing = SUPPLIER_PACKS.filter((pack) => !rows.some((row) => row.file === pack.file));
 
   return (
     <div className="space-y-5">
       <div>
         <h1 className="text-xl font-semibold">Evaluation</h1>
-        <p className="mt-1 text-sm text-navy-500">Runs every bundled sample through the pipeline and compares the result with hand-labelled ground truth. The verification engine never sees the labels.</p>
+        <p className="mt-1 text-sm text-navy-500">Checks saved Verification results against the supplier-pack reference using deterministic rules. No model or PDF reprocessing is used here.</p>
       </div>
-      <Button onClick={run} disabled={running}>{running ? <Loader2 size={15} className="animate-spin" /> : <FlaskConical size={15} />} Run benchmark</Button>
-      {err && <p className="text-sm text-red-600">{err}</p>}
-
-      {summary && rows && (
+      {ready && (
         <>
           <div className="rounded-lg border border-navy-100 bg-white p-3 text-sm text-navy-700">
-            Benchmark covers <b>{summary.labelled}</b> labelled document(s) out of <b>{expectedDocs}</b> expected. {summary.labelled < 10 && "This is not a 10-document evaluation, and a sample this small does not support statistical claims."} Extraction mode: <b>{mode}</b>.
+            Found <b>{summary.labelled}</b> saved result(s) matching <b>{SUPPLIER_PACKS.length}</b> supplier packs. {missing.length > 0 && <><b>{missing.length}</b> pack(s) have not been verified yet.</>}
           </div>
           <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
             {[
@@ -120,7 +77,10 @@ export default function EvaluationPage() {
                         <td className="px-4 py-3"><DecisionBadge decision={r.expected} /></td>
                         <td className="px-4 py-3">{r.predicted ? <DecisionBadge decision={r.predicted} /> : <span className="text-red-600">failed</span>}</td>
                         <td className={`px-4 py-3 font-semibold ${okRow ? "text-emerald-700" : "text-red-600"}`}>{okRow ? "Correct" : "Incorrect"}</td>
-                        <td className="px-4 py-3 text-xs text-navy-700">{okRow ? r.reason : `System said: ${r.why ?? "n/a"} — Expected because: ${r.reason}`}</td>
+                        <td className="px-4 py-3 text-xs text-navy-700">
+                          {okRow ? r.reason : `System said: ${r.why ?? "n/a"} — Expected because: ${r.reason}`}
+                          {r.evidence.length > 0 && <div className="mt-1 text-red-600">Evidence mismatches: {r.evidence.join(", ")}</div>}
+                        </td>
                       </tr>
                     );
                   })}
@@ -128,6 +88,14 @@ export default function EvaluationPage() {
               </table>
             </div>
           </Card>
+          {missing.length > 0 && (
+            <Card>
+              <CardHeader title="Not yet evaluated" sub="These supplier-pack references have no saved Verification result." />
+              <ul className="list-disc space-y-1 px-6 pb-4 text-sm text-navy-700">
+                {missing.map((pack) => <li key={pack.file}>{pack.file} ({pack.quotationNumber})</li>)}
+              </ul>
+            </Card>
+          )}
         </>
       )}
     </div>
