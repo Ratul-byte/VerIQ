@@ -190,5 +190,4 @@ requested items, quantities, units, and maximum prices.
 - Free AI models can be slow or temporarily unavailable.
 - PDF layouts and scanned/image-only PDFs may require additional extraction work.
 - Results are local to the browser and are not shared between users or devices.
-- A complete multi-document benchmark depends on having all labelled supplier
-  PDFs available.
+- Simplicity in UI/UX and lack of real life data may not be best final product for an official production deployment.
